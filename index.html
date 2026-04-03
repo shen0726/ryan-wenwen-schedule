@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#4f46e5" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Ryan和Wenwen的日程表" />
+  <title>Ryan和Wenwen的日程表</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192x192.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .fade-in { animation: fadeIn .2s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+    .bg-stripe { background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 10px, #e2e8f0 10px, #e2e8f0 20px); }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col items-center py-6 px-4">
+
+  <!-- Auth Screen -->
+  <div id="authScreen" class="w-full max-w-md bg-white rounded-2xl shadow-lg p-8 mt-10 hidden">
+    <h1 class="text-2xl font-bold text-slate-700 text-center mb-6">日程小工具</h1>
+    <div class="flex gap-2 mb-6 bg-slate-100 p-1 rounded-lg">
+      <button id="tabLogin" class="flex-1 py-2 rounded-md text-sm font-medium bg-white shadow text-slate-700 transition">登录</button>
+      <button id="tabRegister" class="flex-1 py-2 rounded-md text-sm font-medium text-slate-500 hover:text-slate-700 transition">注册</button>
+    </div>
+    <form id="authForm" class="space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-500 mb-1">用户名</label>
+        <input type="text" id="authUsername" required class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="username" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-500 mb-1">密码</label>
+        <input type="password" id="authPassword" required class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="password" />
+      </div>
+      <p id="authError" class="text-red-500 text-sm hidden"></p>
+      <button type="submit" id="authSubmit" class="w-full px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition shadow font-medium">登录</button>
+    </form>
+  </div>
+
+  <!-- Main App -->
+  <div id="appScreen" class="w-full max-w-6xl hidden flex-col">
+    <!-- Header -->
+    <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl font-bold text-slate-700">📅 我的日程</h1>
+        <div class="flex items-center bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+          <button data-view="day" class="view-btn px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 border-r border-slate-200">日</button>
+          <button data-view="3day" class="view-btn px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 border-r border-slate-200">3日</button>
+          <button data-view="week" class="view-btn px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 border-r border-slate-200">周</button>
+          <button data-view="month" class="view-btn px-3 py-1.5 text-sm bg-indigo-600 text-white">月</button>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <button id="prevBtn" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 transition">&lt;</button>
+          <span id="rangeLabel" class="text-lg font-semibold w-40 text-center"></span>
+          <button id="todayBtn" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-sm transition">今天</button>
+          <button id="nextBtn" class="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 transition">&gt;</button>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="currentUser" class="text-sm text-slate-500"></span>
+          <button id="logoutBtn" class="px-3 py-1.5 text-sm rounded-lg text-slate-600 hover:bg-slate-100 transition border border-slate-200">退出</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="w-full bg-white rounded-2xl shadow-lg overflow-hidden flex flex-col md:flex-row min-h-[600px]">
+      <!-- Calendar Area -->
+      <div class="w-full md:w-2/3 p-4 border-b md:border-b-0 md:border-r border-slate-100">
+        <!-- Month view day headers -->
+        <div id="monthDayHeaders" class="grid grid-cols-7 gap-2 mb-2 text-center text-sm font-medium text-slate-400 hidden">
+          <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+        </div>
+        <div id="calendarArea" class="relative"></div>
+      </div>
+
+      <!-- Sidebar -->
+      <div class="w-full md:w-1/3 p-4 bg-slate-50/50 flex flex-col gap-4">
+        <!-- Selected Day Events -->
+        <div class="bg-white rounded-xl border border-slate-100 p-4 flex-1 min-h-[220px]">
+          <div class="flex items-center justify-between mb-3">
+            <h2 id="selectedDateTitle" class="text-lg font-bold text-slate-700">请选择日期</h2>
+            <button id="addBtn" class="hidden px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition shadow">+ 新建</button>
+          </div>
+          <div id="eventList" class="space-y-3 max-h-64 overflow-y-auto">
+            <p class="text-slate-400 text-sm text-center mt-10">点击左侧日期查看或添加日程</p>
+          </div>
+        </div>
+
+        <!-- Friends -->
+        <div class="bg-white rounded-xl border border-slate-100 p-4 flex-1 min-h-[220px]">
+          <h3 class="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">好友日历</h3>
+          <!-- Pending subscription requests -->
+          <div id="pendingArea" class="mb-3 hidden">
+            <p class="text-xs text-slate-500 mb-1">待处理请求</p>
+            <div id="pendingList" class="space-y-2"></div>
+          </div>
+          <!-- Pending event invitations -->
+          <div id="pendingInvitationsArea" class="mb-3 hidden">
+            <p class="text-xs text-slate-500 mb-1">日程邀请</p>
+            <div id="pendingInvitationsList" class="space-y-2 max-h-40 overflow-y-auto"></div>
+          </div>
+          <!-- Search -->
+          <div class="flex gap-2 mb-3">
+            <input id="friendSearch" type="text" placeholder="搜索用户名添加好友" class="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <button id="friendSearchBtn" class="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition">搜索</button>
+          </div>
+          <div id="searchResults" class="space-y-2 mb-3 hidden"></div>
+          <!-- Friends List -->
+          <div id="friendsList" class="space-y-2 max-h-48 overflow-y-auto">
+            <p class="text-slate-400 text-xs text-center">暂无好友</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event Modal -->
+  <div id="modal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 backdrop-blur-sm">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 mx-4 fade-in">
+      <h3 id="modalTitle" class="text-lg font-bold mb-4 text-slate-700">新建日程</h3>
+      <form id="eventForm" class="space-y-4">
+        <input type="hidden" id="eventId" />
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">标题</label>
+          <input type="text" id="eventTitle" required class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="例如：团队会议" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">日期</label>
+          <input type="date" id="eventDate" required class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </div>
+        <div class="flex gap-2">
+          <div class="flex-1">
+            <label class="block text-xs font-medium text-slate-500 mb-1">开始时间</label>
+            <input type="time" id="eventTime" required class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div class="flex-1">
+            <label class="block text-xs font-medium text-slate-500 mb-1">结束时间</label>
+            <input type="time" id="eventEndTime" class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">备注</label>
+          <textarea id="eventDesc" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" placeholder="可选"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">参与者</label>
+          <div id="participantTags" class="flex flex-wrap gap-2 mb-2"></div>
+          <div class="flex gap-2">
+            <select id="participantSelect" class="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+              <option value="">选择好友...</option>
+            </select>
+            <button type="button" id="addParticipantBtn" class="px-3 py-2 bg-slate-100 text-slate-700 text-sm rounded-lg hover:bg-slate-200 transition">+ 添加</button>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" id="cancelBtn" class="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100 transition">取消</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition shadow">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:3000';
+
+    // DOM refs
+    const authScreen = document.getElementById('authScreen');
+    const appScreen = document.getElementById('appScreen');
+    const tabLogin = document.getElementById('tabLogin');
+    const tabRegister = document.getElementById('tabRegister');
+    const authForm = document.getElementById('authForm');
+    const authUsername = document.getElementById('authUsername');
+    const authPassword = document.getElementById('authPassword');
+    const authSubmit = document.getElementById('authSubmit');
+    const authError = document.getElementById('authError');
+
+    const calendarArea = document.getElementById('calendarArea');
+    const monthDayHeaders = document.getElementById('monthDayHeaders');
+    const rangeLabel = document.getElementById('rangeLabel');
+    const selectedDateTitle = document.getElementById('selectedDateTitle');
+    const eventList = document.getElementById('eventList');
+    const addBtn = document.getElementById('addBtn');
+    const modal = document.getElementById('modal');
+    const modalTitle = document.getElementById('modalTitle');
+    const eventForm = document.getElementById('eventForm');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const eventIdEl = document.getElementById('eventId');
+    const eventTitleEl = document.getElementById('eventTitle');
+    const eventDateEl = document.getElementById('eventDate');
+    const eventTimeEl = document.getElementById('eventTime');
+    const eventEndTimeEl = document.getElementById('eventEndTime');
+    const eventDescEl = document.getElementById('eventDesc');
+    const participantTags = document.getElementById('participantTags');
+    const participantSelect = document.getElementById('participantSelect');
+    const addParticipantBtn = document.getElementById('addParticipantBtn');
+
+    // State
+    let token = localStorage.getItem('schedule_token') || '';
+    let username = localStorage.getItem('schedule_username') || '';
+    let currentDate = new Date();
+    let viewMode = 'month'; // month | week | day | 3day
+    let selectedDateStr = formatDate(new Date());
+    let myEvents = [];
+    let friendEvents = {}; // { dateStr: [{username, events[]}] }
+    let friends = [];
+    let pending = [];
+    let pendingInvitations = [];
+    let authMode = 'login';
+    let currentParticipants = []; // usernames array for modal
+    let hiddenFriends = JSON.parse(localStorage.getItem('schedule_hidden_friends') || '[]'); // 隐藏的好友日历
+
+    function pad(n) { return n < 10 ? '0' + n : n; }
+    function formatDate(d) { return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+    function startOfWeek(d) { const day = d.getDay(); const start = new Date(d); start.setDate(d.getDate() - day); start.setHours(0,0,0,0); return start; }
+    function addDays(d, n) { const res = new Date(d); res.setDate(d.getDate() + n); return res; }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(API_BASE + path, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+        },
+        ...opts,
+        body: opts.body ? JSON.stringify(opts.body) : undefined
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    }
+
+    /* ---------- Auth ---------- */
+    function showAuth() {
+      authScreen.classList.remove('hidden');
+      appScreen.classList.add('hidden');
+      appScreen.classList.remove('flex');
+    }
+    function showApp() {
+      authScreen.classList.add('hidden');
+      appScreen.classList.remove('hidden');
+      appScreen.classList.add('flex');
+      document.getElementById('currentUser').textContent = username;
+    }
+
+    tabLogin.addEventListener('click', () => setAuthMode('login'));
+    tabRegister.addEventListener('click', () => setAuthMode('register'));
+    function setAuthMode(mode) {
+      authMode = mode;
+      if (mode === 'login') {
+        tabLogin.className = 'flex-1 py-2 rounded-md text-sm font-medium bg-white shadow text-slate-700 transition';
+        tabRegister.className = 'flex-1 py-2 rounded-md text-sm font-medium text-slate-500 hover:text-slate-700 transition';
+        authSubmit.textContent = '登录';
+      } else {
+        tabRegister.className = 'flex-1 py-2 rounded-md text-sm font-medium bg-white shadow text-slate-700 transition';
+        tabLogin.className = 'flex-1 py-2 rounded-md text-sm font-medium text-slate-500 hover:text-slate-700 transition';
+        authSubmit.textContent = '注册';
+      }
+      authError.classList.add('hidden');
+    }
+
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      authError.classList.add('hidden');
+      try {
+        if (authMode === 'register') {
+          await api('/api/auth/register', { method: 'POST', body: { username: authUsername.value, password: authPassword.value } });
+          setAuthMode('login');
+          authError.textContent = '注册成功，请登录';
+          authError.classList.remove('hidden');
+          authError.classList.remove('text-red-500');
+          authError.classList.add('text-green-600');
+          return;
+        }
+        const data = await api('/api/auth/login', { method: 'POST', body: { username: authUsername.value, password: authPassword.value } });
+        token = data.token;
+        username = data.username;
+        localStorage.setItem('schedule_token', token);
+        localStorage.setItem('schedule_username', username);
+        showApp();
+        await initData();
+      } catch (err) {
+        authError.textContent = err.message;
+        authError.classList.remove('hidden');
+        authError.classList.add('text-red-500');
+        authError.classList.remove('text-green-600');
+      }
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      token = ''; username = ''; myEvents = []; friendEvents = {}; friends = []; pending = [];
+      localStorage.removeItem('schedule_token');
+      localStorage.removeItem('schedule_username');
+      showAuth();
+    });
+
+    /* ---------- Data ---------- */
+    async function initData() {
+      await Promise.all([loadFriends(), loadPending(), loadPendingInvitations()]);
+      await loadEventsRange();
+      render();
+    }
+
+    async function loadEventsRange() {
+      const { start, end } = getViewRange();
+      try {
+        myEvents = await api(`/api/events?start=${start}&end=${end}`);
+      } catch (err) {
+        console.error('Failed to load my events', err);
+        myEvents = [];
+      }
+      // Load friend events (exclude hidden friends)
+      friendEvents = {};
+      const outFriends = friends.filter(f => f.direction === 'outgoing' && !hiddenFriends.includes(f.username));
+      await Promise.all(outFriends.map(async f => {
+        try {
+          const evs = await api(`/api/events/friend/${f.username}?start=${start}&end=${end}`);
+          // Sort by time
+          evs.sort((a, b) => a.time.localeCompare(b.time));
+          evs.forEach(ev => {
+            if (!friendEvents[ev.date]) friendEvents[ev.date] = [];
+            const entry = friendEvents[ev.date].find(x => x.username === f.username);
+            if (entry) entry.events.push(ev);
+            else friendEvents[ev.date].push({ username: f.username, events: [ev] });
+          });
+        } catch (err) {
+          console.error('Failed to load friend events for', f.username, err);
+        }
+      }));
+    }
+
+    async function loadFriends() {
+      try { friends = await api('/api/subscriptions/friends'); }
+      catch (err) { friends = []; }
+      renderFriends();
+    }
+    async function loadPending() {
+      try { pending = await api('/api/subscriptions/pending'); }
+      catch (err) { pending = []; }
+      renderPending();
+    }
+    async function loadPendingInvitations() {
+      try { pendingInvitations = await api('/api/participants/pending'); }
+      catch (err) { pendingInvitations = []; }
+      renderPendingInvitations();
+    }
+
+    /* ---------- Calendar Core ---------- */
+    function getViewRange() {
+      let start, end;
+      if (viewMode === 'month') {
+        const first = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+        const last = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+        const s = addDays(first, -first.getDay());
+        const e = addDays(last, 6 - last.getDay());
+        start = formatDate(s); end = formatDate(e);
+      } else if (viewMode === 'week') {
+        const s = startOfWeek(currentDate);
+        const e = addDays(s, 6);
+        start = formatDate(s); end = formatDate(e);
+      } else if (viewMode === 'day') {
+        start = formatDate(currentDate); end = start;
+      } else if (viewMode === '3day') {
+        start = formatDate(currentDate); end = formatDate(addDays(currentDate, 2));
+      }
+      return { start, end };
+    }
+
+    function getEventsForDate(dateStr) {
+      const owned = myEvents.filter(e => e.isOwner && e.date === dateStr).sort((a,b) => a.time.localeCompare(b.time));
+      const participated = myEvents.filter(e => !e.isOwner && e.date === dateStr).sort((a,b) => a.time.localeCompare(b.time));
+      const friendsList = friendEvents[dateStr] || [];
+      return { owned, participated, friends: friendsList };
+    }
+
+    function selectDate(dateStr) {
+      selectedDateStr = dateStr;
+      if (viewMode !== 'month') {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        currentDate = new Date(y, m - 1, d);
+      }
+      render();
+    }
+    document.getElementById('todayBtn').addEventListener('click', () => { currentDate = new Date(); selectedDateStr = formatDate(new Date()); render(); });
+    document.getElementById('prevBtn').addEventListener('click', () => { moveView(-1); });
+    document.getElementById('nextBtn').addEventListener('click', () => { moveView(1); });
+
+    function moveView(dir) {
+      if (viewMode === 'month') currentDate.setMonth(currentDate.getMonth() + dir);
+      else if (viewMode === 'week') currentDate = addDays(currentDate, dir * 7);
+      else if (viewMode === 'day') currentDate = addDays(currentDate, dir);
+      else if (viewMode === '3day') currentDate = addDays(currentDate, dir * 3);
+      render();
+    }
+
+    document.querySelectorAll('.view-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        viewMode = btn.dataset.view;
+        document.querySelectorAll('.view-btn').forEach(b => {
+          if (b.dataset.view === viewMode) b.className = 'view-btn px-3 py-1.5 text-sm bg-indigo-600 text-white';
+          else b.className = 'view-btn px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 border-r border-slate-200';
+        });
+        const last = document.querySelector('.view-btn:last-child');
+        if (last.dataset.view !== viewMode) last.classList.remove('bg-indigo-600','text-white');
+        else last.classList.add('bg-indigo-600','text-white');
+        // Fix border-r on last when deselected
+        document.querySelectorAll('.view-btn').forEach((b, i, arr) => {
+          if (i === arr.length - 1) b.classList.remove('border-r');
+          else b.classList.add('border-r');
+        });
+        render();
+      });
+    });
+
+    async function render() {
+      await loadEventsRange(); // refresh events for current range
+      rangeLabel.textContent = getRangeLabel();
+      calendarArea.innerHTML = '';
+      if (viewMode === 'month') {
+        monthDayHeaders.classList.remove('hidden');
+        renderMonth();
+      } else {
+        monthDayHeaders.classList.add('hidden');
+        if (viewMode === 'week') renderWeek();
+        else if (viewMode === 'day') renderDay();
+        else if (viewMode === '3day') render3Day();
+      }
+      renderDayEvents(selectedDateStr);
+    }
+
+    function getRangeLabel() {
+      const y = currentDate.getFullYear();
+      const m = currentDate.getMonth() + 1;
+      if (viewMode === 'month') return `${y}年 ${m}月`;
+      if (viewMode === 'day') return `${y}年 ${m}月 ${currentDate.getDate()}日`;
+      if (viewMode === '3day') {
+        const e = addDays(currentDate, 2);
+        return `${m}月${currentDate.getDate()}日 - ${e.getMonth()+1}月${e.getDate()}日`;
+      }
+      const s = startOfWeek(currentDate);
+      const e = addDays(s, 6);
+      return `${s.getMonth()+1}月${s.getDate()}日 - ${e.getMonth()+1}月${e.getDate()}日`;
+    }
+
+    /* ---------- Month View ---------- */
+    function renderMonth() {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      const startDay = firstDay.getDay();
+      const totalDays = lastDay.getDate();
+      const todayStr = formatDate(new Date());
+
+      // blanks
+      for (let i = 0; i < startDay; i++) {
+        const empty = document.createElement('div');
+        calendarArea.appendChild(empty);
+      }
+
+      const grid = document.createElement('div');
+      grid.className = 'grid grid-cols-7 gap-2';
+      for (let d = 1; d <= totalDays; d++) {
+        const dateStr = `${year}-${pad(month+1)}-${pad(d)}`;
+        const { owned, participated, friends } = getEventsForDate(dateStr);
+        const isToday = dateStr === todayStr;
+        const isSelected = dateStr === selectedDateStr;
+        const cell = document.createElement('div');
+        cell.className = `relative h-20 rounded-xl border p-2 cursor-pointer transition flex flex-col justify-between ${isSelected ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-slate-100 hover:border-indigo-200 hover:shadow-sm'}`;
+        const indicators = [];
+        if (owned.length) indicators.push('<span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>');
+        if (participated.length) indicators.push('<span class="w-1.5 h-1.5 rounded-full bg-violet-400"></span>');
+        friends.forEach((f, i) => {
+          const colors = ['bg-emerald-400','bg-amber-400','bg-rose-400','bg-cyan-400'];
+          indicators.push(`<span class="w-1.5 h-1.5 rounded-full ${colors[i % colors.length]}"></span>`);
+        });
+        cell.innerHTML = `
+          <span class="text-sm font-medium ${isToday ? 'text-indigo-600' : 'text-slate-600'}">${d}</span>
+          <div class="flex gap-1 flex-wrap content-end">${indicators.join('')}</div>
+          ${isToday ? '<span class="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-indigo-500"></span>' : ''}
+        `;
+        cell.addEventListener('click', () => selectDate(dateStr));
+        grid.appendChild(cell);
+      }
+      calendarArea.appendChild(grid);
+    }
+
+    /* ---------- Day / 3Day / Week Views ---------- */
+    function renderDay() { renderColumnView(1, [currentDate]); }
+    function render3Day() { renderColumnView(3, [0,1,2].map(i => addDays(currentDate, i))); }
+    function renderWeek() { const s = startOfWeek(currentDate); renderColumnView(7, [0,1,2,3,4,5,6].map(i => addDays(s, i))); }
+
+    function renderColumnView(colCount, dates) {
+      const grid = document.createElement('div');
+      grid.className = `grid grid-cols-${colCount} gap-2 h-[520px]`;
+      const colClass = colCount === 1 ? 'grid-cols-1' : colCount === 3 ? 'grid-cols-3' : 'grid-cols-7';
+      grid.className = `grid ${colClass} gap-2 h-[520px]`;
+      const todayStr = formatDate(new Date());
+
+      dates.forEach(d => {
+        const dateStr = formatDate(d);
+        const { owned, participated, friends } = getEventsForDate(dateStr);
+        const isToday = dateStr === todayStr;
+        const isSelected = dateStr === selectedDateStr;
+        const col = document.createElement('div');
+        col.className = `rounded-xl border p-2 flex flex-col h-full overflow-hidden ${isSelected ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-slate-100'}`;
+        col.innerHTML = `
+          <div class="text-center text-sm font-medium mb-2 ${isToday ? 'text-indigo-600' : 'text-slate-500'}">
+            ${d.getMonth()+1}/${d.getDate()} ${['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]}
+          </div>
+          <div class="flex-1 overflow-y-auto space-y-2"></div>
+        `;
+        const list = col.querySelector('.overflow-y-auto');
+        // Owned events
+        owned.forEach(ev => {
+          const el = document.createElement('div');
+          el.className = 'px-2 py-1 rounded-lg bg-indigo-50 border border-indigo-100 text-xs cursor-pointer hover:bg-indigo-100';
+          const timeStr = ev.endTime ? `${ev.time}-${ev.endTime}` : ev.time;
+          el.innerHTML = `<span class="font-mono text-indigo-600">${timeStr}</span> <span class="text-slate-700">${escapeHtml(ev.title)}</span>`;
+          el.addEventListener('click', (e) => { e.stopPropagation(); openModal(ev); });
+          list.appendChild(el);
+        });
+        // Participated events
+        participated.forEach(ev => {
+          const el = document.createElement('div');
+          const timeStr = ev.endTime ? `${ev.time}-${ev.endTime}` : ev.time;
+          if (ev.invitationStatus === 'pending') {
+            el.className = 'px-2 py-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-500 text-xs cursor-pointer';
+            el.innerHTML = `<span class="font-mono">${timeStr}</span> <span>${escapeHtml(ev.title)}</span> <span class="opacity-60">(?)</span>`;
+          } else if (ev.invitationStatus === 'tentative') {
+            el.className = 'px-2 py-1 rounded-lg border border-slate-200 text-slate-600 text-xs cursor-pointer bg-stripe';
+            el.innerHTML = `<span class="font-mono">${timeStr}</span> <span>${escapeHtml(ev.title)}</span> <span class="opacity-60">(~)</span>`;
+          } else {
+            el.className = 'px-2 py-1 rounded-lg bg-violet-50 border border-violet-100 text-violet-700 text-xs cursor-pointer';
+            el.innerHTML = `<span class="font-mono">${timeStr}</span> <span>${escapeHtml(ev.title)}</span> <span class="opacity-60">(✓)</span>`;
+          }
+          el.addEventListener('click', (e) => { e.stopPropagation(); selectDate(ev.date); renderDayEvents(ev.date); });
+          list.appendChild(el);
+        });
+        // Friend events
+        const colors = ['bg-emerald-50 border-emerald-100 text-emerald-700','bg-amber-50 border-amber-100 text-amber-700','bg-rose-50 border-rose-100 text-rose-700','bg-cyan-50 border-cyan-100 text-cyan-700'];
+        friends.forEach((f, fi) => {
+          f.events.forEach(ev => {
+            const el = document.createElement('div');
+            const c = colors[fi % colors.length];
+            el.className = `px-2 py-1 rounded-lg border text-xs ${c}`;
+            const timeStr = ev.endTime ? `${ev.time}-${ev.endTime}` : ev.time;
+            el.innerHTML = `<span class="font-mono opacity-80">${timeStr}</span> <span>${escapeHtml(ev.title)}</span> <span class="opacity-60">(${f.username})</span>`;
+            list.appendChild(el);
+          });
+        });
+        col.addEventListener('click', () => selectDate(dateStr));
+        grid.appendChild(col);
+      });
+      calendarArea.appendChild(grid);
+    }
+
+    /* ---------- Sidebar Events ---------- */
+    function renderDayEvents(dateStr) {
+      selectedDateTitle.textContent = `${dateStr} 日程`;
+      addBtn.classList.remove('hidden');
+      eventList.innerHTML = '';
+      const { owned, participated, friends } = getEventsForDate(dateStr);
+      if (owned.length === 0 && participated.length === 0 && friends.length === 0) {
+        eventList.innerHTML = `<p class="text-slate-400 text-sm text-center mt-6">暂无日程<br/>点击下方按钮添加</p>`;
+        return;
+      }
+      // Owned events
+      owned.forEach(ev => {
+        const card = document.createElement('div');
+        card.className = 'bg-white p-3 rounded-xl border border-slate-100 shadow-sm hover:shadow transition group';
+        const pList = (ev.participants || []).map(p => {
+          const icon = p.status === 'accepted' ? '✓' : p.status === 'tentative' ? '~' : p.status === 'declined' ? '✗' : '?';
+          return `<span class="text-xs text-slate-500">${escapeHtml(p.username)} ${icon}</span>`;
+        }).join(' · ');
+        card.innerHTML = `
+          <div class="flex justify-between items-start">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">${ev.endTime ? ev.time + '-' + ev.endTime : ev.time}</span>
+                <h4 class="font-semibold text-slate-700">${escapeHtml(ev.title)}</h4>
+              </div>
+              ${ev.description ? `<p class="text-sm text-slate-500 mt-1">${escapeHtml(ev.description)}</p>` : ''}
+              ${pList ? `<div class="mt-1 truncate">${pList}</div>` : ''}
+            </div>
+            <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+              <button data-id="${ev.id}" class="edit-btn px-2 py-1 text-xs rounded hover:bg-slate-100 text-slate-500">编辑</button>
+              <button data-id="${ev.id}" class="del-btn px-2 py-1 text-xs rounded hover:bg-red-50 text-red-500">删除</button>
+            </div>
+          </div>
+        `;
+        card.querySelector('.edit-btn').addEventListener('click', () => openModal(ev));
+        card.querySelector('.del-btn').addEventListener('click', () => deleteEvent(ev.id));
+        eventList.appendChild(card);
+      });
+      // Participated events
+      participated.forEach(ev => {
+        const card = document.createElement('div');
+        let statusBadge = '';
+        let actionBar = '';
+        if (ev.invitationStatus === 'pending') {
+          card.className = 'bg-slate-50 p-3 rounded-xl border border-dashed border-slate-300';
+          statusBadge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">待确认</span>';
+        } else if (ev.invitationStatus === 'tentative') {
+          card.className = 'bg-stripe p-3 rounded-xl border border-slate-200';
+          statusBadge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">暂定</span>';
+        } else {
+          card.className = 'bg-violet-50 p-3 rounded-xl border border-violet-100';
+          statusBadge = '<span class="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">已参加</span>';
+        }
+        // Show other participants for accepted events
+        let participantsList = '';
+        if (ev.invitationStatus === 'accepted' && ev.participants && ev.participants.length > 0) {
+          const others = ev.participants.filter(p => p.username !== username);
+          if (others.length > 0) {
+            const pIcons = others.map(p => {
+              const icon = p.status === 'accepted' ? '✓' : p.status === 'tentative' ? '~' : p.status === 'declined' ? '✗' : '?';
+              return `${escapeHtml(p.username)}${icon}`;
+            }).join(' · ');
+            participantsList = `<div class="mt-2 text-xs text-slate-500">参与者: ${pIcons}</div>`;
+          }
+        }
+        actionBar = `
+          <div class="flex gap-2 mt-2">
+            <button data-event="${ev.id}" data-action="accepted" class="rsvp-btn px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700">参加</button>
+            <button data-event="${ev.id}" data-action="tentative" class="rsvp-btn px-2 py-1 text-xs rounded bg-amber-500 text-white hover:bg-amber-600">暂定</button>
+            <button data-event="${ev.id}" data-action="declined" class="rsvp-btn px-2 py-1 text-xs rounded bg-slate-400 text-white hover:bg-slate-500">不参加</button>
+          </div>
+        `;
+        card.innerHTML = `
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-xs font-mono text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-100">${ev.endTime ? ev.time + '-' + ev.endTime : ev.time}</span>
+            <h4 class="font-semibold text-slate-700">${escapeHtml(ev.title)}</h4>
+            ${statusBadge}
+          </div>
+          ${ev.description ? `<p class="text-sm text-slate-500">${escapeHtml(ev.description)}</p>` : ''}
+          ${participantsList}
+          ${actionBar}
+        `;
+        card.querySelectorAll('.rsvp-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => { e.stopPropagation(); respondInvitation(btn.dataset.event, btn.dataset.action); });
+        });
+        eventList.appendChild(card);
+      });
+      // Friend events
+      const colors = ['text-emerald-600','text-amber-600','text-rose-600','text-cyan-600'];
+      friends.forEach((f, fi) => {
+        f.events.forEach(ev => {
+          const card = document.createElement('div');
+          card.className = 'bg-slate-50 p-3 rounded-xl border border-slate-100';
+          card.innerHTML = `
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs font-mono ${colors[fi % colors.length]} bg-white px-1.5 py-0.5 rounded border border-slate-100">${ev.endTime ? ev.time + '-' + ev.endTime : ev.time}</span>
+              <h4 class="font-semibold text-slate-700">${escapeHtml(ev.title)}</h4>
+              <span class="text-xs text-slate-400">(${f.username})</span>
+            </div>
+            ${ev.description ? `<p class="text-sm text-slate-500">${escapeHtml(ev.description)}</p>` : ''}
+          `;
+          eventList.appendChild(card);
+        });
+      });
+    }
+
+    function openModal(ev = null) {
+      modal.classList.remove('hidden'); modal.classList.add('flex');
+      currentParticipants = [];
+      if (ev) {
+        modalTitle.textContent = '编辑日程';
+        eventIdEl.value = ev.id;
+        eventTitleEl.value = ev.title;
+        eventDateEl.value = ev.date;
+        eventTimeEl.value = ev.time;
+        eventEndTimeEl.value = ev.endTime || '';
+        eventDescEl.value = ev.description || '';
+        currentParticipants = (ev.participants || []).map(p => p.username);
+      } else {
+        modalTitle.textContent = '新建日程';
+        eventIdEl.value = '';
+        eventForm.reset();
+        eventDateEl.value = selectedDateStr;
+        eventTimeEl.value = '09:00';
+        eventEndTimeEl.value = '';
+      }
+      updateParticipantSelect();
+      renderParticipantTags();
+      eventTitleEl.focus();
+    }
+
+    function updateParticipantSelect() {
+      participantSelect.innerHTML = '<option value="">选择好友...</option>';
+      friends.forEach(f => {
+        if (!currentParticipants.includes(f.username)) {
+          const opt = document.createElement('option');
+          opt.value = f.username;
+          opt.textContent = f.username;
+          participantSelect.appendChild(opt);
+        }
+      });
+    }
+
+    function renderParticipantTags() {
+      participantTags.innerHTML = '';
+      currentParticipants.forEach(uname => {
+        const tag = document.createElement('span');
+        tag.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs border border-indigo-100';
+        tag.innerHTML = `${escapeHtml(uname)} <button type="button" class="remove-participant text-indigo-400 hover:text-indigo-600" data-user="${uname}">×</button>`;
+        tag.querySelector('.remove-participant').addEventListener('click', () => {
+          currentParticipants = currentParticipants.filter(u => u !== uname);
+          updateParticipantSelect();
+          renderParticipantTags();
+        });
+        participantTags.appendChild(tag);
+      });
+    }
+
+    addParticipantBtn.addEventListener('click', () => {
+      const val = participantSelect.value;
+      if (!val || currentParticipants.includes(val)) return;
+      currentParticipants.push(val);
+      updateParticipantSelect();
+      renderParticipantTags();
+    });
+    function closeModal() { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+    addBtn.addEventListener('click', () => openModal());
+
+    eventForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = eventIdEl.value;
+      const payload = {
+        title: eventTitleEl.value.trim(),
+        date: eventDateEl.value,
+        time: eventTimeEl.value,
+        endTime: eventEndTimeEl.value,
+        description: eventDescEl.value.trim(),
+        participants: currentParticipants
+      };
+      try {
+        if (id) await api(`/api/events/${id}`, { method: 'PUT', body: payload });
+        else await api('/api/events', { method: 'POST', body: payload });
+        closeModal();
+        render();
+      } catch (err) { alert(err.message); }
+    });
+
+    async function deleteEvent(id) {
+      if (!confirm('确定删除这条日程吗？')) return;
+      try { await api(`/api/events/${id}`, { method: 'DELETE' }); render(); }
+      catch (err) { alert(err.message); }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div'); div.textContent = text; return div.innerHTML;
+    }
+
+    /* ---------- Friends ---------- */
+    const friendSearch = document.getElementById('friendSearch');
+    const friendSearchBtn = document.getElementById('friendSearchBtn');
+    const searchResults = document.getElementById('searchResults');
+    const friendsList = document.getElementById('friendsList');
+    const pendingArea = document.getElementById('pendingArea');
+    const pendingList = document.getElementById('pendingList');
+    const pendingInvitationsArea = document.getElementById('pendingInvitationsArea');
+    const pendingInvitationsList = document.getElementById('pendingInvitationsList');
+
+    friendSearchBtn.addEventListener('click', searchUsers);
+    friendSearch.addEventListener('keypress', e => { if (e.key === 'Enter') searchUsers(); });
+
+    async function searchUsers() {
+      const q = friendSearch.value.trim();
+      if (!q) return;
+      try {
+        const results = await api(`/api/users/search?q=${encodeURIComponent(q)}`);
+        searchResults.innerHTML = '';
+        if (results.length === 0) { searchResults.classList.add('hidden'); return; }
+        searchResults.classList.remove('hidden');
+        results.forEach(u => {
+          const row = document.createElement('div');
+          row.className = 'flex items-center justify-between bg-slate-50 px-2 py-1.5 rounded border border-slate-100';
+          row.innerHTML = `<span class="text-sm text-slate-700">${escapeHtml(u.username)}</span><button class="add-friend px-2 py-0.5 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">订阅</button>`;
+          row.querySelector('.add-friend').addEventListener('click', async () => {
+            try {
+              await api('/api/subscriptions/request', { method: 'POST', body: { targetUsername: u.username } });
+              alert('订阅请求已发送');
+              friendSearch.value = '';
+              searchResults.classList.add('hidden');
+              await loadPending();
+            } catch (err) { alert(err.message); }
+          });
+          searchResults.appendChild(row);
+        });
+      } catch (err) { alert(err.message); }
+    }
+
+    function renderPending() {
+      pendingList.innerHTML = '';
+      if (pending.length) {
+        pendingArea.classList.remove('hidden');
+        pending.forEach(req => {
+          const row = document.createElement('div');
+          row.className = 'flex items-center justify-between bg-amber-50 px-2 py-1.5 rounded border border-amber-100';
+          row.innerHTML = `<span class="text-sm text-slate-700">${escapeHtml(req.subscriber)}</span><div class="flex gap-1"><button data-id="${req.id}" class="acc-btn px-2 py-0.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">接受</button><button data-id="${req.id}" class="rej-btn px-2 py-0.5 text-xs bg-slate-400 text-white rounded hover:bg-slate-500">拒绝</button></div>`;
+          row.querySelector('.acc-btn').addEventListener('click', () => respond(req.id, 'accept'));
+          row.querySelector('.rej-btn').addEventListener('click', () => respond(req.id, 'reject'));
+          pendingList.appendChild(row);
+        });
+      } else { pendingArea.classList.add('hidden'); }
+    }
+
+    async function respond(id, action) {
+      try { await api('/api/subscriptions/respond', { method: 'POST', body: { requestId: id, action } }); await initData(); }
+      catch (err) { alert(err.message); }
+    }
+
+    async function respondInvitation(eventId, status) {
+      try { await api('/api/participants/respond', { method: 'POST', body: { eventId, status } }); await initData(); }
+      catch (err) { alert(err.message); }
+    }
+
+    function renderPendingInvitations() {
+      pendingInvitationsList.innerHTML = '';
+      if (pendingInvitations.length) {
+        pendingInvitationsArea.classList.remove('hidden');
+        pendingInvitations.forEach(inv => {
+          const row = document.createElement('div');
+          row.className = 'bg-slate-50 px-2 py-2 rounded border border-slate-100';
+          const timeStr = inv.event.endTime ? `${inv.event.time}-${inv.event.endTime}` : inv.event.time;
+          const statusLabel = inv.status === 'tentative' ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1 rounded">暂定</span>' : '';
+          row.innerHTML = `
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-sm font-medium text-slate-700 truncate">${escapeHtml(inv.event.title)} ${statusLabel}</span>
+              <span class="text-xs text-slate-400">${inv.invitedBy}</span>
+            </div>
+            <div class="text-xs text-slate-500 mb-1">${inv.event.date} ${timeStr}</div>
+            <div class="flex gap-1">
+              <button data-event="${inv.eventId}" data-action="accepted" class="rsvp-pending-btn px-2 py-0.5 text-[10px] bg-emerald-600 text-white rounded hover:bg-emerald-700">参加</button>
+              <button data-event="${inv.eventId}" data-action="tentative" class="rsvp-pending-btn px-2 py-0.5 text-[10px] bg-amber-500 text-white rounded hover:bg-amber-600">暂定</button>
+              <button data-event="${inv.eventId}" data-action="declined" class="rsvp-pending-btn px-2 py-0.5 text-[10px] bg-slate-400 text-white rounded hover:bg-slate-500">不参加</button>
+            </div>
+          `;
+          row.querySelectorAll('.rsvp-pending-btn').forEach(btn => {
+            btn.addEventListener('click', () => respondInvitation(btn.dataset.event, btn.dataset.action));
+          });
+          pendingInvitationsList.appendChild(row);
+        });
+      } else {
+        pendingInvitationsArea.classList.add('hidden');
+      }
+    }
+
+    function renderFriends() {
+      friendsList.innerHTML = '';
+      if (friends.length === 0) { friendsList.innerHTML = '<p class="text-slate-400 text-xs text-center">暂无好友</p>'; return; }
+      friends.forEach(f => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between bg-slate-50 px-2 py-1.5 rounded border border-slate-100';
+        const dirLabel = f.direction === 'outgoing' ? '已订阅' : '订阅我';
+        const isHidden = hiddenFriends.includes(f.username);
+        const eyeIcon = isHidden ? '👁️‍🗨️' : '👁️';
+        const eyeClass = isHidden ? 'text-slate-400' : 'text-indigo-600';
+        row.innerHTML = `
+          <span class="text-sm text-slate-700 ${isHidden ? 'opacity-50' : ''}">${escapeHtml(f.username)} <span class="text-xs text-slate-400">(${dirLabel})</span></span>
+          <div class="flex gap-1">
+            <button data-user="${f.username}" class="toggle-view-btn px-1.5 py-0.5 text-xs ${eyeClass} hover:bg-slate-100 rounded" title="${isHidden ? '显示' : '隐藏'}日历">${eyeIcon}</button>
+            <button data-id="${f.id}" class="unsub-btn px-2 py-0.5 text-xs text-red-500 hover:bg-red-50 rounded">移除</button>
+          </div>
+        `;
+        row.querySelector('.toggle-view-btn').addEventListener('click', () => {
+          if (hiddenFriends.includes(f.username)) {
+            hiddenFriends = hiddenFriends.filter(u => u !== f.username);
+          } else {
+            hiddenFriends.push(f.username);
+          }
+          localStorage.setItem('schedule_hidden_friends', JSON.stringify(hiddenFriends));
+          renderFriends();
+          render();
+        });
+        row.querySelector('.unsub-btn').addEventListener('click', async () => {
+          if (!confirm('确定移除该好友关系吗？')) return;
+          try { await api(`/api/subscriptions/${f.id}`, { method: 'DELETE' }); await initData(); }
+          catch (err) { alert(err.message); }
+        });
+        friendsList.appendChild(row);
+      });
+    }
+
+    /* ---------- Init ---------- */
+    (async () => {
+      if (token) {
+        try {
+          showApp();
+          await initData();
+        } catch (err) {
+          token = ''; username = '';
+          localStorage.removeItem('schedule_token');
+          localStorage.removeItem('schedule_username');
+          showAuth();
+        }
+      } else {
+        showAuth();
+      }
+    })();
+
+    // Register Service Worker for PWA
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .then((registration) => {
+            console.log('SW registered:', registration.scope);
+          })
+          .catch((error) => {
+            console.log('SW registration failed:', error);
+          });
+      });
+    }
+
+    // PWA Install prompt handling
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      // 可以在这里显示"添加到主屏幕"按钮
+      console.log('PWA install prompt available');
+    });
+
+    // Request notification permission
+    async function requestNotificationPermission() {
+      if ('Notification' in window) {
+        const permission = await Notification.requestPermission();
+        return permission === 'granted';
+      }
+      return false;
+    }
+  </script>
+  <!-- Tailwind JIT safelist -->
+  <div class="hidden grid-cols-1 grid-cols-3 grid-cols-7 h-[520px]"></div>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export PATH=\"$HOME/.local/nodejs/bin:$PATH\")",
+      "Bash(npm -v)",
+      "Bash(node server.js)",
+      "Bash(curl -s http://localhost:3000/api/auth/register -X POST -H \"Content-Type: application/json\" -d '{\"username\":\"alice\",\"password\":\"123456\"}')",
+      "Bash(curl -s http://localhost:3000/api/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"username\":\"alice\",\"password\":\"123456\"}')",
+      "Bash(curl -s http://localhost:3000/api/auth/register -X POST -H \"Content-Type: application/json\" -d '{\"username\":\"bob\",\"password\":\"123456\"}')",
+      "Bash(curl -s http://localhost:3000/api/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"username\":\"bob\",\"password\":\"123456\"}')",
+      "Bash(pkill -f \"node server.js\")",
+      "Bash(curl -s http://localhost:3000)"
+    ]
+  }
+}
