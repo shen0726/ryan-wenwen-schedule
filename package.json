@@ -1,0 +1,19 @@
+{
+  "name": "schedule-app",
+  "version": "1.0.0",
+  "description": "Ryan and Wenwen's Schedule App",
+  "scripts": {
+    "start": "node server/server.js",
+    "build": "echo 'No build needed for static site'"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
