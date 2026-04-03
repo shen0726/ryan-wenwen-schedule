@@ -5,6 +5,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const { backupToGist, restoreFromGist } = require('./backup');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,13 +32,25 @@ if (!fs.existsSync(SUBS_FILE)) fs.writeFileSync(SUBS_FILE, JSON.stringify([]));
 if (!fs.existsSync(PARTICIPANTS_FILE)) fs.writeFileSync(PARTICIPANTS_FILE, JSON.stringify([]));
 
 function readUsers() { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); }
-function writeUsers(users) { fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2)); }
+function writeUsers(users) {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  backupToGist(); // 自动备份
+}
 function readEvents() { return JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf8')); }
-function writeEvents(events) { fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2)); }
+function writeEvents(events) {
+  fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2));
+  backupToGist(); // 自动备份
+}
 function readSubs() { return JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); }
-function writeSubs(subs) { fs.writeFileSync(SUBS_FILE, JSON.stringify(subs, null, 2)); }
+function writeSubs(subs) {
+  fs.writeFileSync(SUBS_FILE, JSON.stringify(subs, null, 2));
+  backupToGist(); // 自动备份
+}
 function readParticipants() { return JSON.parse(fs.readFileSync(PARTICIPANTS_FILE, 'utf8')); }
-function writeParticipants(parts) { fs.writeFileSync(PARTICIPANTS_FILE, JSON.stringify(parts, null, 2)); }
+function writeParticipants(parts) {
+  fs.writeFileSync(PARTICIPANTS_FILE, JSON.stringify(parts, null, 2));
+  backupToGist(); // 自动备份
+}
 
 function getFriends(userId) {
   const subs = readSubs();
@@ -320,7 +333,26 @@ app.get('/api/events/friend/:username', authMiddleware, (req, res) => {
   res.json(events);
 });
 
-app.listen(PORT, () => {
+// Backup/Restore API (admin only, no auth for simplicity)
+app.post('/api/admin/backup', async (req, res) => {
+  await backupToGist();
+  res.json({ success: true, message: 'Backup triggered' });
+});
+
+app.post('/api/admin/restore', async (req, res) => {
+  const success = await restoreFromGist();
+  if (success) {
+    res.json({ success: true, message: 'Data restored from backup' });
+  } else {
+    res.status(500).json({ error: 'Restore failed' });
+  }
+});
+
+app.listen(PORT, async () => {
   console.log(`Schedule server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  // 启动时尝试从备份恢复数据
+  console.log('Checking for backup...');
+  await restoreFromGist();
 });
