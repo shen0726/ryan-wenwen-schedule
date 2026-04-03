@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PWA 部署指南 - Ryan和Wenwen的日程表</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 32px;
+      margin-bottom: 24px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    h1 {
+      color: #1e293b;
+      font-size: 28px;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .subtitle {
+      color: #64748b;
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .step {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 32px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .step:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+    .step-number {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .step-content {
+      flex: 1;
+    }
+    .step h2 {
+      color: #1e293b;
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+    .step p {
+      color: #64748b;
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+    .btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 500;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+    }
+    .code-block {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 16px;
+      border-radius: 8px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+    .code-block .comment {
+      color: #64748b;
+    }
+    .code-block .cmd {
+      color: #7dd3fc;
+    }
+    .checklist {
+      list-style: none;
+    }
+    .checklist li {
+      padding: 8px 0;
+      padding-left: 28px;
+      position: relative;
+      color: #475569;
+    }
+    .checklist li::before {
+      content: "☐";
+      position: absolute;
+      left: 0;
+      color: #667eea;
+      font-size: 18px;
+    }
+    .checklist li.checked::before {
+      content: "☑";
+    }
+    .tip {
+      background: #f0fdf4;
+      border-left: 4px solid #22c55e;
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+      margin: 16px 0;
+      color: #166534;
+    }
+    .warning {
+      background: #fef3c7;
+      border-left: 4px solid #f59e0b;
+      padding: 12px 16px;
+      border-radius: 0 8px 8px 0;
+      margin: 16px 0;
+      color: #92400e;
+    }
+    .auto-deploy {
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      border: 2px dashed #3b82f6;
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+    }
+    .auto-deploy h3 {
+      color: #1e40af;
+      margin-bottom: 12px;
+    }
+    .auto-deploy p {
+      color: #3b82f6;
+      margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>🚀 PWA 部署指南</h1>
+      <p class="subtitle">将你的日程表应用部署到互联网</p>
+
+      <div class="auto-deploy">
+        <h3>⚡ 推荐：一键自动部署</h3>
+        <p>在终端中运行以下命令，自动完成所有步骤</p>
+        <div class="code-block">
+<span class="cmd">cd</span> <span class="comment">"/Users/rshen/Desktop/Claude code"</span><br>
+<span class="cmd">./deploy.sh</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h2>创建 GitHub 仓库</h2>
+          <p>GitHub 是代码托管平台，Vercel 会从这里获取代码进行部署。</p>
+          <ul class="checklist">
+            <li>访问 <a href="https://github.com/new" target="_blank">github.com/new</a></li>
+            <li>Repository name 填写: <code>ryan-wenwen-schedule</code></li>
+            <li>选择 <strong>Public</strong>（公开）</li>
+            <li><strong>不要</strong>勾选 "Add a README file"</li>
+            <li>点击 <strong>Create repository</strong></li>
+          </ul>
+          <div class="tip">
+            💡 创建后，GitHub 会显示一个页面，里面有下一步的命令。复制 "…or push an existing repository" 部分的代码。
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h2>推送代码到 GitHub</h2>
+          <p>在终端中运行以下命令（将 YOUR_USERNAME 替换为你的 GitHub 用户名）：</p>
+          <div class="code-block">
+<span class="comment"># 进入项目目录</span><br>
+<span class="cmd">cd</span> <span class="comment">"/Users/rshen/Desktop/Claude code"</span><br><br>
+<span class="comment"># 添加远程仓库</span><br>
+<span class="cmd">git remote add origin</span> https://github.com/YOUR_USERNAME/ryan-wenwen-schedule.git<br><br>
+<span class="comment"># 推送代码</span><br>
+<span class="cmd">git push -u origin main</span>
+          </div>
+          <div class="tip">
+            💡 第一次推送会要求你登录 GitHub，按提示操作即可。
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h2>部署到 Vercel</h2>
+          <p>Vercel 会自动部署 GitHub 仓库中的代码，并提供免费域名。</p>
+          <ul class="checklist">
+            <li>访问 <a href="https://vercel.com/new" target="_blank">vercel.com/new</a></li>
+            <li>点击 <strong>Continue with GitHub</strong> 登录</li>
+            <li>找到并选择 <code>ryan-wenwen-schedule</code> 仓库</li>
+            <li>Framework Preset 选择 <strong>Other</strong></li>
+            <li>Build Command 留空</li>
+            <li>Output Directory 填写 <code>.</code>（一个点）</li>
+            <li>点击 <strong>Deploy</strong></li>
+          </ul>
+          <div class="warning">
+            ⚠️ 注意：Output Directory 必须是 <code>.</code>（点），因为我们的 index.html 在根目录。
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h2>添加到手机主屏幕</h2>
+          <p>部署完成后，Vercel 会给你类似 <code>ryan-wenwen-schedule.vercel.app</code> 的网址。</p>
+
+          <p><strong>iPhone/iPad (Safari):</strong></p>
+          <ul class="checklist">
+            <li>用 Safari 打开部署后的网址</li>
+            <li>点击底部中间的分享按钮 ⬆️</li>
+            <li>选择 "添加到主屏幕"</li>
+            <li>点击 "添加"</li>
+          </ul>
+
+          <p><strong>Android (Chrome):</strong></p>
+          <ul class="checklist">
+            <li>用 Chrome 打开部署后的网址</li>
+            <li>点击右上角菜单 ⋮</li>
+            <li>选择 "添加到主屏幕"</li>
+            <li>点击 "添加"</li>
+          </ul>
+
+          <div class="tip">
+            🎉 完成！你的应用现在会像原生 App 一样，有启动图标、全屏显示、离线可用！
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="color: #1e293b; margin-bottom: 16px;">📋 验证清单</h2>
+      <ul class="checklist">
+        <li>应用能在浏览器正常打开</li>
+        <li>有自定义图标（RW 紫色图标）</li>
+        <li>添加到主屏幕后显示正常</li>
+        <li>离线刷新页面能正常使用（测试：断网后刷新）</li>
+      </ul>
+
+      <div style="text-align: center; margin-top: 24px;">
+        <a href="http://localhost:8888" class="btn">🧪 先本地测试</a>
+        <a href="https://github.com/new" class="btn" style="margin-left: 12px;">🚀 开始部署</a>
+      </div>
+    </div>
+
+    <div class="card" style="text-align: center; color: #64748b;">
+      <p>遇到问题？检查以下常见原因：</p>
+      <p style="margin-top: 8px; font-size: 14px;">
+        • 图标未显示 → 检查 icons/ 目录是否在根目录<br>
+        • 离线不工作 → 检查 service-worker.js 是否在根目录<br>
+        • 部署失败 → 确认 Output Directory 设置为 <code>.</code>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

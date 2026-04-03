@@ -7,15 +7,20 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
-const PORT = 3000;
-const JWT_SECRET = 'schedule-tool-secret-key-2025';
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'schedule-tool-secret-key-2025';
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const EVENTS_FILE = path.join(DATA_DIR, 'events.json');
 const SUBS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 const PARTICIPANTS_FILE = path.join(DATA_DIR, 'participants.json');
 
-app.use(cors());
+// CORS - allow all origins for now (Render + Vercel setup)
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // Ensure data directory and files exist
@@ -316,5 +321,6 @@ app.get('/api/events/friend/:username', authMiddleware, (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Schedule server running at http://localhost:${PORT}`);
+  console.log(`Schedule server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
