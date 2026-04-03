@@ -1,52 +1,21 @@
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const { pool, initDatabase } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'schedule-tool-secret-key-2025';
-const DATA_DIR = path.join(__dirname, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const EVENTS_FILE = path.join(DATA_DIR, 'events.json');
-const SUBS_FILE = path.join(DATA_DIR, 'subscriptions.json');
-const PARTICIPANTS_FILE = path.join(DATA_DIR, 'participants.json');
 
-// CORS - allow all origins for now (Render + Vercel setup)
+// CORS - allow all origins
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
-
-// Ensure data directory and files exist
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify([]));
-if (!fs.existsSync(EVENTS_FILE)) fs.writeFileSync(EVENTS_FILE, JSON.stringify([]));
-if (!fs.existsSync(SUBS_FILE)) fs.writeFileSync(SUBS_FILE, JSON.stringify([]));
-if (!fs.existsSync(PARTICIPANTS_FILE)) fs.writeFileSync(PARTICIPANTS_FILE, JSON.stringify([]));
-
-function readUsers() { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); }
-function writeUsers(users) { fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2)); }
-function readEvents() { return JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf8')); }
-function writeEvents(events) { fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2)); }
-function readSubs() { return JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); }
-function writeSubs(subs) { fs.writeFileSync(SUBS_FILE, JSON.stringify(subs, null, 2)); }
-function readParticipants() { return JSON.parse(fs.readFileSync(PARTICIPANTS_FILE, 'utf8')); }
-function writeParticipants(parts) { fs.writeFileSync(PARTICIPANTS_FILE, JSON.stringify(parts, null, 2)); }
-
-function getFriends(userId) {
-  const subs = readSubs();
-  const users = readUsers();
-  const friendIds = subs
-    .filter(s => s.status === 'accepted' && (s.subscriberId === userId || s.targetId === userId))
-    .map(s => s.subscriberId === userId ? s.targetId : s.subscriberId);
-  return users.filter(u => friendIds.includes(u.id));
-}
 
 function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
@@ -64,263 +33,445 @@ function authMiddleware(req, res, next) {
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-  const users = readUsers();
-  if (users.find(u => u.username === username)) return res.status(409).json({ error: 'User already exists' });
-  const passwordHash = bcrypt.hashSync(password, 10);
-  users.push({ id: uuidv4(), username, passwordHash });
-  writeUsers(users);
-  res.json({ success: true, message: 'Registered' });
+
+  try {
+    const passwordHash = bcrypt.hashSync(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3) RETURNING id',
+      [uuidv4(), username, passwordHash]
+    );
+    res.json({ success: true, message: 'Registered' });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'User already exists' });
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // Login
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  const users = readUsers();
-  const user = users.find(u => u.username === username);
-  if (!user || !bcrypt.compareSync(password, user.passwordHash)) return res.status(401).json({ error: 'Invalid credentials' });
-  const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ token, username: user.username });
+  try {
+    const result = await pool.query('SELECT id, username, password_hash FROM users WHERE username = $1', [username]);
+    const user = result.rows[0];
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, username: user.username });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// Get events in range (owned + participated, excluding declined)
-app.get('/api/events', authMiddleware, (req, res) => {
+// Get events in range
+app.get('/api/events', authMiddleware, async (req, res) => {
   const { start, end } = req.query;
-  const users = readUsers();
-  const participants = readParticipants();
+  try {
+    // Events I own with participants
+    let eventsQuery = `
+      SELECT e.*, true as is_owner,
+        COALESCE(json_agg(
+          json_build_object(
+            'userId', p.user_id,
+            'username', u2.username,
+            'status', p.status
+          ) ORDER BY u2.username
+        ) FILTER (WHERE p.user_id IS NOT NULL), '[]') as participants
+      FROM events e
+      LEFT JOIN participants p ON e.id = p.event_id
+      LEFT JOIN users u2 ON p.user_id = u2.id
+      WHERE e.user_id = $1
+      GROUP BY e.id
+    `;
 
-  // Events I own
-  let events = readEvents().filter(e => e.userId === req.user.userId).map(e => {
-    const parts = participants
-      .filter(p => p.eventId === e.id)
-      .map(p => ({ userId: p.userId, username: users.find(u => u.id === p.userId)?.username || 'unknown', status: p.status }));
-    return { ...e, isOwner: true, participants: parts };
-  });
+    if (start && end) {
+      eventsQuery += ` AND e.date BETWEEN $2 AND $3`;
+    }
 
-  // Events I'm invited to (not declined)
-  const myParticipations = participants.filter(p => p.userId === req.user.userId && p.status !== 'declined');
-  const allEvents = readEvents();
-  const invitedEvents = myParticipations.map(p => {
-    const ev = allEvents.find(e => e.id === p.eventId);
-    if (!ev) return null;
-    // Include all participants for this event
-    const parts = participants
-      .filter(part => part.eventId === ev.id)
-      .map(part => ({ userId: part.userId, username: users.find(u => u.id === part.userId)?.username || 'unknown', status: part.status }));
-    return { ...ev, isOwner: false, invitationStatus: p.status, participants: parts };
-  }).filter(Boolean);
+    const ownedResult = await pool.query(eventsQuery, start && end ? [req.user.userId, start, end] : [req.user.userId]);
+    let events = ownedResult.rows.map(e => ({ ...e, isOwner: true, participants: e.participants || [] }));
 
-  events = events.concat(invitedEvents);
+    // Events I'm invited to (not declined)
+    const invitedQuery = `
+      SELECT e.*, p2.status as invitation_status, false as is_owner,
+        COALESCE(json_agg(
+          json_build_object(
+            'userId', p3.user_id,
+            'username', u3.username,
+            'status', p3.status
+          ) ORDER BY u3.username
+        ) FILTER (WHERE p3.user_id IS NOT NULL), '[]') as participants
+      FROM participants p2
+      JOIN events e ON p2.event_id = e.id
+      LEFT JOIN participants p3 ON e.id = p3.event_id
+      LEFT JOIN users u3 ON p3.user_id = u3.id
+      WHERE p2.user_id = $1 AND p2.status != 'declined'
+    `;
 
-  // deduplicate if I'm both owner and participant (edge case)
-  const seen = new Set();
-  events = events.filter(e => { if (seen.has(e.id)) return false; seen.add(e.id); return true; });
+    const invitedResult = await pool.query(
+      start && end ? invitedQuery + ` AND e.date BETWEEN $2 AND $3 GROUP BY e.id, p2.status` : invitedQuery + ` GROUP BY e.id, p2.status`,
+      start && end ? [req.user.userId, start, end] : [req.user.userId]
+    );
 
-  if (start && end) events = events.filter(e => e.date >= start && e.date <= end);
-  res.json(events);
+    const invitedEvents = invitedResult.rows.map(e => ({
+      ...e,
+      isOwner: false,
+      invitationStatus: e.invitation_status,
+      participants: e.participants || []
+    }));
+
+    // Deduplicate
+    const seen = new Set(events.map(e => e.id));
+    invitedEvents.forEach(e => {
+      if (!seen.has(e.id)) {
+        seen.add(e.id);
+        events.push(e);
+      }
+    });
+
+    res.json(events);
+  } catch (err) {
+    console.error('Get events error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // Create event
-app.post('/api/events', authMiddleware, (req, res) => {
+app.post('/api/events', authMiddleware, async (req, res) => {
   const { title, date, time, endTime, description, participants = [] } = req.body;
   if (!title || !date || !time) return res.status(400).json({ error: 'title, date, time required' });
-  const events = readEvents();
-  const event = { id: uuidv4(), userId: req.user.userId, title, date, time, endTime: endTime || '', description: description || '', createdAt: new Date().toISOString() };
-  events.push(event);
-  writeEvents(events);
 
-  // Create participant invitations (friends only)
-  const friendUsers = getFriends(req.user.userId);
-  const parts = readParticipants();
-  participants.forEach(uname => {
-    const target = friendUsers.find(u => u.username === uname && u.id !== req.user.userId);
-    if (target && !parts.find(p => p.eventId === event.id && p.userId === target.id)) {
-      parts.push({ id: uuidv4(), eventId: event.id, userId: target.id, invitedBy: req.user.userId, status: 'pending', createdAt: new Date().toISOString() });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Create event
+    const eventId = uuidv4();
+    await client.query(
+      'INSERT INTO events (id, user_id, title, date, time, end_time, description) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [eventId, req.user.userId, title, date, time, endTime || null, description || '']
+    );
+
+    // Get friend IDs
+    const friendsResult = await client.query(
+      `SELECT DISTINCT u.id FROM users u
+       JOIN subscriptions s ON (u.id = s.target_id AND s.subscriber_id = $1) OR (u.id = s.subscriber_id AND s.target_id = $1)
+       WHERE s.status = 'accepted' AND u.username = ANY($2)`,
+      [req.user.userId, participants]
+    );
+
+    // Create participant invitations
+    for (const friend of friendsResult.rows) {
+      await client.query(
+        'INSERT INTO participants (id, event_id, user_id, invited_by, status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
+        [uuidv4(), eventId, friend.id, req.user.userId, 'pending']
+      );
     }
-  });
-  writeParticipants(parts);
 
-  res.json(event);
+    await client.query('COMMIT');
+
+    const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [eventId]);
+    res.json(eventResult.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Create event error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
 });
 
 // Update event
-app.put('/api/events/:id', authMiddleware, (req, res) => {
+app.put('/api/events/:id', authMiddleware, async (req, res) => {
   const { title, date, time, endTime, description, participants = [] } = req.body;
-  const events = readEvents();
-  const idx = events.findIndex(e => e.id === req.params.id && e.userId === req.user.userId);
-  if (idx === -1) return res.status(404).json({ error: 'Not found' });
-  events[idx] = { ...events[idx], title, date, time, endTime: endTime || '', description: description || '' };
-  writeEvents(events);
 
-  // Sync participant list
-  const friendUsers = getFriends(req.user.userId);
-  let parts = readParticipants();
-  const eventId = req.params.id;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  // Remove participants no longer in list
-  parts = parts.filter(p => {
-    if (p.eventId !== eventId) return true;
-    const uname = friendUsers.find(u => u.id === p.userId)?.username;
-    return participants.includes(uname);
-  });
+    // Update event
+    const updateResult = await client.query(
+      'UPDATE events SET title = $1, date = $2, time = $3, end_time = $4, description = $5 WHERE id = $6 AND user_id = $7 RETURNING *',
+      [title, date, time, endTime || null, description || '', req.params.id, req.user.userId]
+    );
 
-  // Add new participants
-  participants.forEach(uname => {
-    const target = friendUsers.find(u => u.username === uname && u.id !== req.user.userId);
-    if (target && !parts.find(p => p.eventId === eventId && p.userId === target.id)) {
-      parts.push({ id: uuidv4(), eventId, userId: target.id, invitedBy: req.user.userId, status: 'pending', createdAt: new Date().toISOString() });
+    if (updateResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Not found' });
     }
-  });
-  writeParticipants(parts);
 
-  res.json(events[idx]);
+    // Get friend IDs
+    const friendsResult = await client.query(
+      `SELECT DISTINCT u.id FROM users u
+       JOIN subscriptions s ON (u.id = s.target_id AND s.subscriber_id = $1) OR (u.id = s.subscriber_id AND s.target_id = $1)
+       WHERE s.status = 'accepted' AND u.username = ANY($2)`,
+      [req.user.userId, participants]
+    );
+    const friendIds = friendsResult.rows.map(f => f.id);
+
+    // Remove participants not in list
+    await client.query(
+      'DELETE FROM participants WHERE event_id = $1 AND user_id NOT IN (SELECT unnest($2::uuid[]))',
+      [req.params.id, friendIds.length > 0 ? friendIds : [null]]
+    );
+
+    // Add new participants
+    for (const friendId of friendIds) {
+      await client.query(
+        'INSERT INTO participants (id, event_id, user_id, invited_by, status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
+        [uuidv4(), req.params.id, friendId, req.user.userId, 'pending']
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json(updateResult.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Update event error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
 });
 
 // Delete event
-app.delete('/api/events/:id', authMiddleware, (req, res) => {
-  let events = readEvents();
-  const originalLen = events.length;
-  events = events.filter(e => !(e.id === req.params.id && e.userId === req.user.userId));
-  if (events.length === originalLen) return res.status(404).json({ error: 'Not found' });
-  writeEvents(events);
-
-  // Cascade delete participants
-  let parts = readParticipants();
-  parts = parts.filter(p => p.eventId !== req.params.id);
-  writeParticipants(parts);
-
-  res.json({ success: true });
+app.delete('/api/events/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM events WHERE id = $1 AND user_id = $2 RETURNING id',
+      [req.params.id, req.user.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete event error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// Get my pending/tentative event invitations
-app.get('/api/participants/pending', authMiddleware, (req, res) => {
-  const parts = readParticipants().filter(p => p.userId === req.user.userId && (p.status === 'pending' || p.status === 'tentative'));
-  const events = readEvents();
-  const users = readUsers();
-  const result = parts.map(p => {
-    const ev = events.find(e => e.id === p.eventId);
-    const owner = users.find(u => u.id === p.invitedBy);
-    return {
-      id: p.id,
-      eventId: p.eventId,
-      status: p.status,
-      event: ev || null,
-      invitedBy: owner?.username || 'unknown'
-    };
-  }).filter(x => x.event);
-  res.json(result);
+// Get pending invitations
+app.get('/api/participants/pending', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT p.id, p.event_id, p.status,
+        json_build_object('id', e.id, 'title', e.title, 'date', e.date, 'time', e.time, 'end_time', e.end_time, 'description', e.description) as event,
+        u.username as invited_by
+       FROM participants p
+       JOIN events e ON p.event_id = e.id
+       JOIN users u ON p.invited_by = u.id
+       WHERE p.user_id = $1 AND p.status IN ('pending', 'tentative')`,
+      [req.user.userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Get pending invitations error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // Respond to invitation
-app.post('/api/participants/respond', authMiddleware, (req, res) => {
+app.post('/api/participants/respond', authMiddleware, async (req, res) => {
   const { eventId, status } = req.body;
-  if (!['accepted', 'declined', 'tentative'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
-  let parts = readParticipants();
-  const idx = parts.findIndex(p => p.eventId === eventId && p.userId === req.user.userId);
-  if (idx === -1) return res.status(404).json({ error: 'Invitation not found' });
-  parts[idx].status = status;
-  writeParticipants(parts);
-  res.json({ success: true, status });
+  if (!['accepted', 'declined', 'tentative'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+  try {
+    const result = await pool.query(
+      'UPDATE participants SET status = $1 WHERE event_id = $2 AND user_id = $3 RETURNING id',
+      [status, eventId, req.user.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Invitation not found' });
+    res.json({ success: true, status });
+  } catch (err) {
+    console.error('Respond invitation error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // Search users
-app.get('/api/users/search', authMiddleware, (req, res) => {
+app.get('/api/users/search', authMiddleware, async (req, res) => {
   const q = (req.query.q || '').toLowerCase();
-  const users = readUsers();
-  const results = users
-    .filter(u => u.id !== req.user.userId && u.username.toLowerCase().includes(q))
-    .map(u => ({ id: u.id, username: u.username }));
-  res.json(results);
+  try {
+    const result = await pool.query(
+      'SELECT id, username FROM users WHERE id != $1 AND LOWER(username) LIKE $2 LIMIT 10',
+      [req.user.userId, `%${q}%`]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Search users error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// Get user profile by username (public info)
-app.get('/api/users/:username', authMiddleware, (req, res) => {
-  const users = readUsers();
-  const user = users.find(u => u.username === req.params.username);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ id: user.id, username: user.username });
+// Get user by username
+app.get('/api/users/:username', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, username FROM users WHERE username = $1', [req.params.username]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Get user error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // Request subscription
-app.post('/api/subscriptions/request', authMiddleware, (req, res) => {
+app.post('/api/subscriptions/request', authMiddleware, async (req, res) => {
   const { targetUsername } = req.body;
-  const users = readUsers();
-  const target = users.find(u => u.username === targetUsername);
-  if (!target) return res.status(404).json({ error: 'User not found' });
-  if (target.id === req.user.userId) return res.status(400).json({ error: 'Cannot subscribe to yourself' });
-  const subs = readSubs();
-  const existing = subs.find(s => s.subscriberId === req.user.userId && s.targetId === target.id);
-  if (existing) return res.status(409).json({ error: 'Already requested or subscribed' });
-  subs.push({ id: uuidv4(), subscriberId: req.user.userId, targetId: target.id, status: 'pending', createdAt: new Date().toISOString() });
-  writeSubs(subs);
-  res.json({ success: true });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const targetResult = await client.query('SELECT id FROM users WHERE username = $1', [targetUsername]);
+    if (targetResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const targetId = targetResult.rows[0].id;
+
+    if (targetId === req.user.userId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Cannot subscribe to yourself' });
+    }
+
+    await client.query(
+      'INSERT INTO subscriptions (id, subscriber_id, target_id, status) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+      [uuidv4(), req.user.userId, targetId, 'pending']
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') return res.status(409).json({ error: 'Already requested or subscribed' });
+    console.error('Request subscription error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
 });
 
-// Respond to subscription request
-app.post('/api/subscriptions/respond', authMiddleware, (req, res) => {
-  const { requestId, action } = req.body; // action: 'accept' | 'reject'
-  const subs = readSubs();
-  const idx = subs.findIndex(s => s.id === requestId && s.targetId === req.user.userId && s.status === 'pending');
-  if (idx === -1) return res.status(404).json({ error: 'Request not found' });
-  if (action === 'accept') subs[idx].status = 'accepted';
-  else subs.splice(idx, 1);
-  writeSubs(subs);
-  res.json({ success: true });
+// Respond to subscription
+app.post('/api/subscriptions/respond', authMiddleware, async (req, res) => {
+  const { requestId, action } = req.body;
+  try {
+    if (action === 'accept') {
+      await pool.query(
+        "UPDATE subscriptions SET status = 'accepted' WHERE id = $1 AND target_id = $2",
+        [requestId, req.user.userId]
+      );
+    } else {
+      await pool.query(
+        'DELETE FROM subscriptions WHERE id = $1 AND target_id = $2',
+        [requestId, req.user.userId]
+      );
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Respond subscription error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// Get pending requests (incoming)
-app.get('/api/subscriptions/pending', authMiddleware, (req, res) => {
-  const subs = readSubs();
-  const users = readUsers();
-  const pending = subs
-    .filter(s => s.targetId === req.user.userId && s.status === 'pending')
-    .map(s => ({ id: s.id, subscriber: users.find(u => u.id === s.subscriberId)?.username || 'unknown' }));
-  res.json(pending);
+// Get pending subscriptions
+app.get('/api/subscriptions/pending', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT s.id, u.username as subscriber
+       FROM subscriptions s
+       JOIN users u ON s.subscriber_id = u.id
+       WHERE s.target_id = $1 AND s.status = 'pending'`,
+      [req.user.userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Get pending subscriptions error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// Get my subscriptions (outgoing accepted + incoming accepted)
-app.get('/api/subscriptions/friends', authMiddleware, (req, res) => {
-  const subs = readSubs();
-  const users = readUsers();
-  // People I subscribed to and they accepted
-  const subscribedTo = subs
-    .filter(s => s.subscriberId === req.user.userId && s.status === 'accepted')
-    .map(s => ({ id: s.id, username: users.find(u => u.id === s.targetId)?.username || 'unknown', direction: 'outgoing' }));
-  // People who subscribed to me and I accepted
-  const subscribers = subs
-    .filter(s => s.targetId === req.user.userId && s.status === 'accepted')
-    .map(s => ({ id: s.id, username: users.find(u => u.id === s.subscriberId)?.username || 'unknown', direction: 'incoming' }));
-  res.json([...subscribedTo, ...subscribers]);
+// Get friends
+app.get('/api/subscriptions/friends', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT s.id, u.username,
+        CASE WHEN s.subscriber_id = $1 THEN 'outgoing' ELSE 'incoming' END as direction
+       FROM subscriptions s
+       JOIN users u ON (CASE WHEN s.subscriber_id = $1 THEN s.target_id ELSE s.subscriber_id END) = u.id
+       WHERE (s.subscriber_id = $1 OR s.target_id = $1) AND s.status = 'accepted'`,
+      [req.user.userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Get friends error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// Unsubscribe or remove friend
-app.delete('/api/subscriptions/:id', authMiddleware, (req, res) => {
-  let subs = readSubs();
-  const originalLen = subs.length;
-  subs = subs.filter(s => !(s.id === req.params.id && (s.subscriberId === req.user.userId || s.targetId === req.user.userId)));
-  if (subs.length === originalLen) return res.status(404).json({ error: 'Not found' });
-  writeSubs(subs);
-  res.json({ success: true });
+// Delete subscription
+app.delete('/api/subscriptions/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM subscriptions WHERE id = $1 AND (subscriber_id = $2 OR target_id = $2) RETURNING id',
+      [req.params.id, req.user.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete subscription error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// Get friend's events (only if subscribed and accepted)
-app.get('/api/events/friend/:username', authMiddleware, (req, res) => {
-  const users = readUsers();
-  const friend = users.find(u => u.username === req.params.username);
-  if (!friend) return res.status(404).json({ error: 'User not found' });
-  const subs = readSubs();
-  const isFriend = subs.some(s =>
-    ((s.subscriberId === req.user.userId && s.targetId === friend.id) ||
-     (s.subscriberId === friend.id && s.targetId === req.user.userId)) &&
-    s.status === 'accepted'
-  );
-  if (!isFriend) return res.status(403).json({ error: 'Not friends' });
-  const { start, end } = req.query;
-  let events = readEvents().filter(e => e.userId === friend.id);
-  if (start && end) events = events.filter(e => e.date >= start && e.date <= end);
-  res.json(events);
+// Get friend's events
+app.get('/api/events/friend/:username', authMiddleware, async (req, res) => {
+  try {
+    // Check friendship
+    const friendResult = await pool.query(
+      `SELECT u.id FROM users u
+       JOIN subscriptions s ON (u.id = s.target_id AND s.subscriber_id = $1) OR (u.id = s.subscriber_id AND s.target_id = $1)
+       WHERE u.username = $2 AND s.status = 'accepted'`,
+      [req.user.userId, req.params.username]
+    );
+
+    if (friendResult.rows.length === 0) return res.status(403).json({ error: 'Not friends' });
+    const friendId = friendResult.rows[0].id;
+
+    const { start, end } = req.query;
+    let query = 'SELECT * FROM events WHERE user_id = $1';
+    const params = [friendId];
+
+    if (start && end) {
+      query += ' AND date BETWEEN $2 AND $3';
+      params.push(start, end);
+    }
+
+    query += ' ORDER BY date, time';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Get friend events error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`Schedule server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+// Initialize database and start server
+async function startServer() {
+  try {
+    await initDatabase();
+    console.log('Database initialized successfully');
+  } catch (err) {
+    console.error('Database initialization failed:', err);
+    console.log('Server will start, but may not function correctly');
+  }
+
+  app.listen(PORT, () => {
+    console.log(`Schedule server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
+
+startServer();
