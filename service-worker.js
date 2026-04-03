@@ -1,4 +1,4 @@
-const CACHE_NAME = 'schedule-app-v1';
+const CACHE_NAME = 'schedule-app-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
