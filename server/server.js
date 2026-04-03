@@ -9,7 +9,10 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'schedule-tool-secret-key-2025';
-const DATA_DIR = path.join(__dirname, 'data');
+// Use Railway Volume if available, otherwise use local data directory
+const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH
+  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'data')
+  : path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const EVENTS_FILE = path.join(DATA_DIR, 'events.json');
 const SUBS_FILE = path.join(DATA_DIR, 'subscriptions.json');
