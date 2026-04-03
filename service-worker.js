@@ -39,7 +39,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   // API请求使用网络优先
-  if (event.request.url.includes('localhost:3000') ||
+  if (event.request.url.includes('ryan-wenwen-schedule.onrender.com') ||
       event.request.url.includes('supabase.co')) {
     event.respondWith(
       fetch(event.request)
